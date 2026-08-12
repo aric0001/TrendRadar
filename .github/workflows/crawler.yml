@@ -186,3 +186,5 @@ jobs:
             git push
             echo "✅ 已更新 index.html，GitHub Pages 将在 1-2 分钟内刷新"
           fi
+
+# re-register workflow (workbuddy)
