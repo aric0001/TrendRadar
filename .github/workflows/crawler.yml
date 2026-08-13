@@ -2,10 +2,12 @@ name: Get Hot News
 
 on:
   schedule:
-    # 持续运行模式：每小时第 33 分自动运行，无 7 天停用限制。
-    # 修改运行时间：只改第一个数字（0-59），表示每小时第几分钟运行。
-    # 示例："15 * * * *" → 每小时第15分钟；"30 0-14 * * *" → 北京时间 8:00-22:00。
-    - cron: "33 * * * *"
+    # 每小时第 5 分：爬取并刷新 GitHub Pages 实时热榜（不发邮件）
+    - cron: "5 * * * *"
+    # 北京时间 09:33：发送「每日汇总」邮件（report.mode = daily）
+    - cron: "33 9 * * *"
+    # 北京时间 20:33：发送「增量」邮件（仅当有新匹配新闻，report.mode = incremental）
+    - cron: "33 20 * * *"
 
   workflow_dispatch:
 
@@ -66,6 +68,43 @@ jobs:
             echo "Error: Config missing"
             exit 1
           fi
+
+      # --------------------------------------------------------------------------------
+      # 🕘 按调度时间切换报告模式与通知开关
+      #     - 09:33 触发 → daily（每日汇总）+ 发邮件
+      #     - 20:33 触发 → incremental（仅新匹配新闻）+ 发邮件
+      #     - 每小时 :05 触发 → 关闭通知，只刷新 GitHub Pages
+      #     - 手动触发 (workflow_dispatch) → daily + 发邮件（便于验证）
+      # 说明：用 github.event.schedule 判断，即使 GitHub 延迟执行也能准确识别触发来源。
+      # --------------------------------------------------------------------------------
+      - name: 根据调度设置推送模式
+        if: success()
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            MODE="daily"; NOTIFY="true"
+          else
+            case "$SCHEDULE" in
+              "33 9 * * *")  MODE="daily";       NOTIFY="true" ;;
+              "33 20 * * *") MODE="incremental"; NOTIFY="true" ;;
+              *)             MODE="incremental"; NOTIFY="false" ;;
+            esac
+          fi
+          echo "调度表达式: $SCHEDULE"
+          echo "报告模式: $MODE | 通知: $NOTIFY"
+          export MODE NOTIFY
+          python - <<'PY'
+import re, os
+p = "config/config.yaml"
+s = open(p, encoding="utf-8").read()
+s = re.sub(r'(?m)^(\s*)mode:\s*".*?"',
+           lambda m: m.group(1) + f'mode: "{os.environ["MODE"]}"', s, count=1)
+s = re.sub(r'(?m)^(\s*)enable_notification:\s*(true|false)',
+           lambda m: m.group(1) + f'enable_notification: {os.environ["NOTIFY"]}', s, count=1)
+open(p, "w", encoding="utf-8").write(s)
+print("已写入 config.yaml -> mode =", os.environ["MODE"], "| enable_notification =", os.environ["NOTIFY"])
+PY
 
       - name: Run crawler
         if: success()
