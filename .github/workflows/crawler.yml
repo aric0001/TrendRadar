@@ -2,12 +2,10 @@ name: Get Hot News
 
 on:
   schedule:
-    # 每小时第 5 分：爬取并刷新 GitHub Pages 实时热榜（不发邮件）
+    # 每小时第 5 分：爬取并刷新 GitHub Pages 实时热榜。
+    # 同时承担「每日邮件」职责——每天北京时间首班会发送一封每日汇总
+    # （通过 email_sent_date.txt 做日期节流，避免一天 24 封；且不依赖额外的邮件 cron）。
     - cron: "5 * * * *"
-    # 北京时间 09:33：发送「每日汇总」邮件（report.mode = daily）
-    - cron: "33 9 * * *"
-    # 北京时间 20:33：发送「增量」邮件（仅当有新匹配新闻，report.mode = incremental）
-    - cron: "33 20 * * *"
 
   workflow_dispatch:
 
@@ -71,32 +69,37 @@ jobs:
 
       # --------------------------------------------------------------------------------
       # 🕘 按调度时间切换报告模式与通知开关
-      #     - 09:33 触发 -> daily（每日汇总）+ 发邮件
-      #     - 20:33 触发 -> incremental（仅新匹配新闻）+ 发邮件
-      #     - 每小时 :05 触发 -> 关闭通知，只刷新 GitHub Pages
       #     - 手动触发 (workflow_dispatch) -> daily + 发邮件（便于验证）
-      # 说明：用 github.event.schedule 判断，即使 GitHub 延迟执行也能准确识别触发来源。
+      #     - 每小时定时 -> 每天北京时间「首班」发 daily 邮件；当天后续班次仅刷新 Pages
+      #     （日期节流：email_sent_date.txt 记录上次发送日期，跨运行持久化）
       # --------------------------------------------------------------------------------
       - name: 根据调度设置推送模式
+        id: setmode
         if: success()
         env:
           SCHEDULE: ${{ github.event.schedule }}
         run: |
+          TZ=Asia/Shanghai
+          TODAY=$(date +%Y-%m-%d)
+          LAST=$(cat email_sent_date.txt 2>/dev/null || echo "")
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # 手动触发：总是发送，便于验证
+            MODE="daily"; NOTIFY="true"
+          elif [ "$TODAY" != "$LAST" ]; then
+            # 当天首班：发送每日汇总
             MODE="daily"; NOTIFY="true"
           else
-            case "$SCHEDULE" in
-              "33 9 * * *")  MODE="daily";       NOTIFY="true" ;;
-              "33 20 * * *") MODE="incremental"; NOTIFY="true" ;;
-              *)             MODE="incremental"; NOTIFY="false" ;;
-            esac
+            # 当天后续班次：仅刷新热榜，不发邮件
+            MODE="incremental"; NOTIFY="false"
           fi
           echo "调度表达式: $SCHEDULE"
+          echo "今天日期(北京): $TODAY | 上次发送: ${LAST:-无}"
           echo "报告模式: $MODE | 通知: $NOTIFY"
           sed -i "s/^\(  mode: \).*/\1\"$MODE\"/" config/config.yaml
           sed -i "s/^\(  enable_notification: \).*/\1$NOTIFY/" config/config.yaml
           echo "--- 校验 config.yaml 关键字段 ---"
           grep -nE '^  mode:|^  enable_notification:' config/config.yaml
+          echo "notify=$NOTIFY" >> "$GITHUB_OUTPUT"
 
       - name: Run crawler
         if: success()
@@ -135,6 +138,7 @@ jobs:
         if: success()
         env:
           GIT_TOKEN: ${{ github.token }}
+          NOTIFY: ${{ steps.setmode.outputs.notify }}
         run: |
           SRC=$(find output -maxdepth 1 -name "*.html" 2>/dev/null | head -1)
           if [ -z "$SRC" ]; then
@@ -151,4 +155,13 @@ jobs:
             git commit -m "chore: 更新每日热点报告 [skip ci]"
             git push
             echo "✅ 已更新 index.html，GitHub Pages 将在 1-2 分钟内刷新"
+          fi
+          # 若本次发送了邮件，记录今日日期，避免当天重复发送
+          if [ "$NOTIFY" = "true" ]; then
+            TZ=Asia/Shanghai
+            date +%Y-%m-%d > email_sent_date.txt
+            git add email_sent_date.txt
+            git commit -m "chore: 记录每日邮件发送日期 [skip ci]" || true
+            git push || true
+            echo "📧 已记录今日邮件发送: $(date +%Y-%m-%d)"
           fi
