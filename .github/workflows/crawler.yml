@@ -137,6 +137,14 @@ jobs:
         env:
           GIT_TOKEN: ${{ github.token }}
         run: |
+          # 调试：先提交爬虫运行日志（在任何提前退出之前），便于排查
+          if [ -f crawler_debug.log ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add -f crawler_debug.log
+            git commit -m "debug: crawler run log [skip ci]" || true
+            git push || true
+          fi
           SRC=$(find output/html/latest -maxdepth 1 -name "*.html" 2>/dev/null | head -1)
           if [ -z "$SRC" ]; then
             SRC=$(find output -name "*.html" 2>/dev/null | head -1)
@@ -166,10 +174,4 @@ jobs:
             git commit -m "chore: 记录每日邮件发送日期 [skip ci]" || true
             git push || true
             echo "📧 已记录今日邮件发送: $(date +%Y-%m-%d)"
-          fi
-          # 调试：提交爬虫运行日志，便于排查（排查后删除）
-          if [ -f crawler_debug.log ]; then
-            git add crawler_debug.log
-            git commit -m "debug: crawler run log [skip ci]" || true
-            git push || true
           fi
