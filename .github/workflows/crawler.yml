@@ -126,7 +126,7 @@ jobs:
           else
             echo "ℹ️ 今日已发送过邮件，本次不重复发送"
           fi
-          python -m trendradar
+          python -m trendradar 2>&1 | tee crawler_debug.log
 
       # --------------------------------------------------------------------------------
       # 📄 提交 HTML 报告到仓库，供 GitHub Pages 展示实时热榜
@@ -166,4 +166,10 @@ jobs:
             git commit -m "chore: 记录每日邮件发送日期 [skip ci]" || true
             git push || true
             echo "📧 已记录今日邮件发送: $(date +%Y-%m-%d)"
+          fi
+          # 调试：提交爬虫运行日志，便于排查（排查后删除）
+          if [ -f crawler_debug.log ]; then
+            git add crawler_debug.log
+            git commit -m "debug: crawler run log [skip ci]" || true
+            git push || true
           fi
