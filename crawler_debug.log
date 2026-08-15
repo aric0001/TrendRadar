@@ -1,5 +1,5 @@
 配置文件加载成功: config/config.yaml
-[调度] timeline.yaml 未找到: config/timeline.yaml，使用空模板
+[调度] timeline.yaml 加载成功: config/timeline.yaml
 通知渠道配置来源: 邮件(环境变量)
 每个渠道最大账号数: 3
 ============================================================
@@ -10,7 +10,7 @@
 ------------------------------------------------------------
   主程序版本: 6.10.0 ✅ 已是最新
   config.yaml: 2.4.0 ✅ 已是最新
-  timeline.yaml: 文件不存在
+  timeline.yaml: 1.2.0 ✅ 已是最新
   frequency_words.txt: 未找到本地版本号
   ai_interests.txt: 文件不存在
   ai_analysis_prompt.txt: 文件不存在
@@ -28,7 +28,7 @@ GitHub Actions环境，不使用代理
 [存储管理器] GitHub Actions 环境但未配置远程存储，使用本地存储
 [存储管理器] 使用本地存储后端 (数据目录: output)
 存储后端: local
-当前北京时间: 2026-08-15 09:43:49
+当前北京时间: 2026-08-15 09:55:45
 通知功能已启用，将发送通知
 报告模式: daily
 运行模式: 全天汇总模式（所有匹配新闻 + 新增新闻区域 + 按时推送）
@@ -38,15 +38,32 @@ GitHub Actions环境，不使用代理
 获取 baidu 成功（最新数据）
 获取 wallstreetcn-hot 成功（最新数据）
 获取 thepaper 成功（最新数据）
-获取 bilibili-hot-search 成功（最新数据）
+获取 bilibili-hot-search 成功（缓存数据）
 获取 cls-hot 成功（缓存数据）
-获取 ifeng 成功（缓存数据）
-获取 tieba 成功（缓存数据）
+获取 ifeng 成功（最新数据）
+获取 tieba 成功（最新数据）
 获取 weibo 成功（缓存数据）
-获取 douyin 成功（缓存数据）
+获取 douyin 成功（最新数据）
 获取 zhihu 成功（最新数据）
 成功: ['toutiao', 'baidu', 'wallstreetcn-hot', 'thepaper', 'bilibili-hot-search', 'cls-hot', 'ifeng', 'tieba', 'weibo', 'douyin', 'zhihu'], 失败: []
 [本地存储] 处理完成：新增 255 条
 数据已保存到存储后端: local
-分析流程执行出错: 未知的预设模板: 'morning_evening'，可选值: , custom
+[存储] 从存储后端检测到 255 条新增标题
+当前监控平台: ['toutiao', 'baidu', 'wallstreetcn-hot', 'thepaper', 'bilibili-hot-search', 'cls-hot', 'ifeng', 'tieba', 'weibo', 'douyin', 'zhihu']
+[存储] 已从存储后端读取 255 条标题
+读取到 255 个标题（已按当前监控平台过滤）
+[存储] 从存储后端检测到 255 条新增标题
+当日汇总模式：处理 255 条新闻，模式：频率词过滤
+当日汇总模式：处理 255 条新闻，模式：频率词过滤
+频率词过滤后：3 条新闻匹配
+新增热点过滤后：3 条保留（原始 255 条）
+HTML报告已生成: output/html/2026-08-15/09-56.html
+最新报告已更新: output/html/latest/daily.html
+[推送] 准备发送：热榜 3 条，合计 3 条
+新增热点过滤后：3 条保留（原始 255 条）
+使用HTML文件: output/html/2026-08-15/09-56.html
+正在发送邮件到 7376084@qq.com...
+SMTP 服务器: smtp.qq.com:465
+发件人: 7376084@qq.com
+邮件发送成功 [全天汇总] -> 7376084@qq.com
 [本地存储] 关闭数据库连接: output/news/2026-08-15.db
