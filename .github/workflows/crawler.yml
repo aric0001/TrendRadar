@@ -72,6 +72,11 @@ jobs:
       #     - 手动触发 (workflow_dispatch) -> daily + 发邮件（便于验证）
       #     - 每小时定时 -> 每天北京时间「首班」发 daily 邮件；当天后续班次仅刷新 Pages
       #     （日期节流：email_sent_date.txt 记录上次发送日期，跨运行持久化）
+      #
+      #  通知控制策略（针对 TrendRadar v2.4.0）：
+      #    程序是否发邮件，取决于 EMAIL_FROM/PASSWORD/TO 三个环境变量是否非空。
+      #    因此本步骤把「本次是否该发」写入 $GITHUB_ENV 的 NOTIFY，
+      #    仅当 NOTIFY=true 时，Run crawler 步才 export 邮件凭据 —— 实现真正的每日一封。
       # --------------------------------------------------------------------------------
       - name: 根据调度设置推送模式
         id: setmode
@@ -96,10 +101,11 @@ jobs:
           echo "今天日期(北京): $TODAY | 上次发送: ${LAST:-无}"
           echo "报告模式: $MODE | 通知: $NOTIFY"
           sed -i "s/^\(  mode: \).*/\1\"$MODE\"/" config/config.yaml
-          sed -i "s/^\(  enable_notification: \).*/\1$NOTIFY/" config/config.yaml
           echo "--- 校验 config.yaml 关键字段 ---"
-          grep -nE '^  mode:|^  enable_notification:' config/config.yaml
+          grep -nE '^  mode:' config/config.yaml
+          # 写入 GITHUB_OUTPUT（备用）与 GITHUB_ENV（跨 step 可靠传递）
           echo "notify=$NOTIFY" >> "$GITHUB_OUTPUT"
+          echo "NOTIFY=$NOTIFY" >> "$GITHUB_ENV"
 
       - name: Run crawler
         if: success()
@@ -110,11 +116,6 @@ jobs:
           DINGTALK_WEBHOOK_URL: ${{ secrets.DINGTALK_WEBHOOK_URL }}
           WEWORK_WEBHOOK_URL: ${{ secrets.WEWORK_WEBHOOK_URL }}
           WEWORK_MSG_TYPE: ${{ secrets.WEWORK_MSG_TYPE }}
-          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
-          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-          EMAIL_TO: ${{ secrets.EMAIL_TO }}
-          EMAIL_SMTP_SERVER: ${{ secrets.EMAIL_SMTP_SERVER }}
-          EMAIL_SMTP_PORT: ${{ secrets.EMAIL_SMTP_PORT }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           NTFY_SERVER_URL: ${{ secrets.NTFY_SERVER_URL }}
           NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
@@ -129,7 +130,19 @@ jobs:
           S3_ENDPOINT_URL: ${{ secrets.S3_ENDPOINT_URL }}
           S3_REGION: ${{ secrets.S3_REGION }}
           GITHUB_ACTIONS: true
-        run: python -m trendradar
+        run: |
+          # 仅在需要通知时注入邮件凭据，避免每小时班重复发送（每日一封）
+          if [ "$NOTIFY" = "true" ]; then
+            echo "📧 本次将发送邮件通知"
+            export EMAIL_FROM="${{ secrets.EMAIL_FROM }}"
+            export EMAIL_PASSWORD="${{ secrets.EMAIL_PASSWORD }}"
+            export EMAIL_TO="${{ secrets.EMAIL_TO }}"
+            export EMAIL_SMTP_SERVER="${{ secrets.EMAIL_SMTP_SERVER }}"
+            export EMAIL_SMTP_PORT="${{ secrets.EMAIL_SMTP_PORT }}"
+          else
+            echo "ℹ️ 今日已发送过邮件，本次不重复发送"
+          fi
+          python -m trendradar
 
       # --------------------------------------------------------------------------------
       # 📄 提交 HTML 报告到仓库，供 GitHub Pages 展示实时热榜
@@ -138,7 +151,6 @@ jobs:
         if: success()
         env:
           GIT_TOKEN: ${{ github.token }}
-          NOTIFY: ${{ steps.setmode.outputs.notify }}
         run: |
           SRC=$(find output -maxdepth 1 -name "*.html" 2>/dev/null | head -1)
           if [ -z "$SRC" ]; then
