@@ -138,7 +138,42 @@ jobs:
           else
             echo "ℹ️ 本次仅刷新 Pages，不发送邮件"
           fi
-          python -m trendradar 2>&1
+          python -m trendradar 2>&1 | tee crawler_run.log
+          # 发信结果检测：senders.py 会静默吞掉 SMTP 报错，run 仍 success，
+          # 需从日志里反推是否真的发出去了
+          if [ "$SHOULD_EMAIL" = "true" ]; then
+            if grep -q "邮件发送成功" crawler_run.log; then
+              rm -f email_failed.txt
+              echo "📧 发信成功（日志已确认）"
+            else
+              {
+                echo "发信失败 @ $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S (Asia/Shanghai)')"
+                echo "run 显示 success，但未检测到『邮件发送成功』日志，疑似 SMTP/授权码失败（被 senders.py 静默吞掉）"
+                echo "SHOULD_EMAIL=$SHOULD_EMAIL"
+              } > email_failed.txt
+              echo "⚠️ 未检测到发信成功日志，已写 email_failed.txt 标记"
+            fi
+          fi
+          rm -f crawler_run.log
+
+      # --------------------------------------------------------------------------------
+      # 📛 提交发信失败标记（若有）—— senders.py 静默吞错，靠此标记暴露失败
+      # --------------------------------------------------------------------------------
+      - name: 提交发信失败标记
+        if: success()
+        env:
+          GIT_TOKEN: ${{ github.token }}
+        run: |
+          if [ -f email_failed.txt ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add email_failed.txt
+            git commit -m "chore: 发信失败标记 [skip ci]" || true
+            git push || true
+            echo "⚠️ 已提交 email_failed.txt，请检查发信配置"
+          else
+            echo "✅ 本次无发信失败标记"
+          fi
 
       # --------------------------------------------------------------------------------
       # 📄 提交 HTML 报告到仓库，供 GitHub Pages 展示实时热榜
