@@ -152,7 +152,10 @@ jobs:
         env:
           GIT_TOKEN: ${{ github.token }}
         run: |
-          SRC=$(find output -maxdepth 1 -name "*.html" 2>/dev/null | head -1)
+          SRC=$(find output -name "index.html" 2>/dev/null | head -1)
+          if [ -z "$SRC" ]; then
+            SRC=$(find output -name "*.html" 2>/dev/null | head -1)
+          fi
           if [ -z "$SRC" ]; then
             echo "ℹ️ 未生成 HTML 报告，跳过提交"
             exit 0
