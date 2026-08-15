@@ -2,10 +2,13 @@ name: Get Hot News
 
 on:
   schedule:
-    # 每小时第 5 分：爬取并刷新 GitHub Pages 实时热榜。
-    # 同时承担「每日邮件」职责——每天北京时间首班会发送一封每日汇总
-    # （通过 email_sent_date.txt 做日期节流，避免一天 24 封；且不依赖额外的邮件 cron）。
-    - cron: "5 * * * *"
+    # 每 3 小时刷新一次 GitHub Pages 实时热榜
+    #   cron 表达式按 UTC：北京时间 = UTC+8，故 "5 1-22/3" 对应北京时间
+    #   00:05 / 03:05 / 06:05 / 09:05 / 12:05 / 15:05 / 18:05 / 21:05（每 3 小时一班）
+    - cron: "5 1-22/3 * * *"
+    # 每日邮件：北京时间 07:00 与 20:00 各发送一封每日汇总
+    #   UTC 23:00 = 北京时间 07:00（次日）；UTC 12:00 = 北京时间 20:00
+    - cron: "0 12,23 * * *"
 
   workflow_dispatch:
 
@@ -64,7 +67,11 @@ jobs:
 
       # --------------------------------------------------------------------------------
       # 🕘 计算「本次是否发邮件」+ 报告模式
-      #    策略：每天北京时间首班 / 手动触发 -> 发 daily 邮件；当天后续班次 -> 仅刷新 Pages
+      #    策略：
+      #      - 每 3 小时班次 -> 仅刷新 Pages（incremental 模式，不发邮件）
+      #      - 北京时间 07:00 / 20:00 班次 -> 发送每日汇总邮件（daily 模式）
+      #      - 手动触发 -> 发送每日汇总邮件（daily 模式）
+      #    节流：email_sent.txt 记录 "sent:日期:时段"，同一时段当天不重复发送
       #    通过工作区文件 .should_email / .report_mode 在 step 间可靠传递（比 GITHUB_ENV 更稳）
       # --------------------------------------------------------------------------------
       - name: 计算发送标志与报告模式
@@ -74,18 +81,23 @@ jobs:
           SCHEDULE: ${{ github.event.schedule }}
         run: |
           TZ=Asia/Shanghai
+          NOW_H=$(date +%H)
           TODAY=$(date +%Y-%m-%d)
-          LAST=$(cat email_sent_date.txt 2>/dev/null || echo "")
+          SLOT=""
+          if [ "$NOW_H" = "7"  ]; then SLOT="morning"; fi
+          if [ "$NOW_H" = "20" ]; then SLOT="evening"; fi
           MODE="incremental"; SHOULD_EMAIL="false"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             MODE="daily"; SHOULD_EMAIL="true"
-          elif [ "$TODAY" != "$LAST" ]; then
-            MODE="daily"; SHOULD_EMAIL="true"
+          elif [ -n "$SLOT" ]; then
+            if ! grep -qxF "sent:${TODAY}:${SLOT}" email_sent.txt 2>/dev/null; then
+              MODE="daily"; SHOULD_EMAIL="true"
+            fi
           fi
           echo "$MODE" > .report_mode
           echo "$SHOULD_EMAIL" > .should_email
           echo "调度表达式: $SCHEDULE"
-          echo "今天日期(北京): $TODAY | 上次发送: ${LAST:-无}"
+          echo "当前(北京)小时: $NOW_H | 时段: ${SLOT:-无} | 今天: $TODAY"
           echo "报告模式: $MODE | 是否发邮件: $SHOULD_EMAIL"
           sed -i "s/^\(  mode: \).*/\1\"$MODE\"/" config/config.yaml
           echo "--- 校验 config.yaml 关键字段 ---"
@@ -124,13 +136,13 @@ jobs:
             export EMAIL_SMTP_SERVER="${{ secrets.EMAIL_SMTP_SERVER }}"
             export EMAIL_SMTP_PORT="${{ secrets.EMAIL_SMTP_PORT }}"
           else
-            echo "ℹ️ 今日已发送过邮件，本次不重复发送"
+            echo "ℹ️ 本次仅刷新 Pages，不发送邮件"
           fi
           python -m trendradar 2>&1
 
       # --------------------------------------------------------------------------------
       # 📄 提交 HTML 报告到仓库，供 GitHub Pages 展示实时热榜
-      #    报告实际路径：output/html/latest/{mode}.html（如 daily.html）
+      #    报告实际路径：output/html/latest/{mode}.html（如 daily.html / incremental.html）
       # --------------------------------------------------------------------------------
       - name: Commit report to repository
         if: success()
@@ -153,17 +165,21 @@ jobs:
           if git diff --cached --quiet; then
             echo "ℹ️ 报告无变化，跳过提交"
           else
-            git commit -m "chore: 更新每日热点报告 [skip ci]"
+            git commit -m "chore: 更新热点报告 [skip ci]"
             git push
             echo "✅ 已更新 index.html，GitHub Pages 将在 1-2 分钟内刷新"
           fi
-          # 若本次发送了邮件，记录今日日期，避免当天重复发送
+          # 若本次发送了邮件，记录时段，避免当天重复发送
           SHOULD_EMAIL=$(cat .should_email 2>/dev/null || echo false)
           if [ "$SHOULD_EMAIL" = "true" ]; then
             TZ=Asia/Shanghai
-            date +%Y-%m-%d > email_sent_date.txt
-            git add email_sent_date.txt
-            git commit -m "chore: 记录每日邮件发送日期 [skip ci]" || true
+            SLOT="manual"
+            NOW_H=$(date +%H)
+            if [ "$NOW_H" = "7"  ]; then SLOT="morning"; fi
+            if [ "$NOW_H" = "20" ]; then SLOT="evening"; fi
+            echo "sent:$(date +%Y-%m-%d):${SLOT}" >> email_sent.txt
+            git add email_sent.txt
+            git commit -m "chore: 记录邮件发送时段 [skip ci]" || true
             git push || true
-            echo "📧 已记录今日邮件发送: $(date +%Y-%m-%d)"
+            echo "📧 已记录邮件发送: $(date +%Y-%m-%d) / ${SLOT}"
           fi
