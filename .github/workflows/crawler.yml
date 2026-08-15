@@ -32,11 +32,6 @@ jobs:
       # --------------------------------------------------------------------------------
       # 🚦 TRAFFIC CONTROL / 流量控制
       # --------------------------------------------------------------------------------
-      # EN: Generates a random delay between 1 and 300 seconds (5 minutes).
-      #     Critical for load balancing.
-      #
-      # CN: 生成 1 到 300 秒（5分钟）之间的随机延迟。
-      #     这对负载均衡至关重要。
       - name: Random Delay (Traffic Control)
         if: success()
         run: |
@@ -68,17 +63,11 @@ jobs:
           fi
 
       # --------------------------------------------------------------------------------
-      # 🕘 按调度时间切换报告模式与通知开关
-      #     - 手动触发 (workflow_dispatch) -> daily + 发邮件（便于验证）
-      #     - 每小时定时 -> 每天北京时间「首班」发 daily 邮件；当天后续班次仅刷新 Pages
-      #     （日期节流：email_sent_date.txt 记录上次发送日期，跨运行持久化）
-      #
-      #  通知控制策略（针对 TrendRadar v2.4.0）：
-      #    程序是否发邮件，取决于 EMAIL_FROM/PASSWORD/TO 三个环境变量是否非空。
-      #    因此本步骤把「本次是否该发」写入 $GITHUB_ENV 的 NOTIFY，
-      #    仅当 NOTIFY=true 时，Run crawler 步才 export 邮件凭据 —— 实现真正的每日一封。
+      # 🕘 计算「本次是否发邮件」+ 报告模式
+      #    策略：每天北京时间首班 / 手动触发 -> 发 daily 邮件；当天后续班次 -> 仅刷新 Pages
+      #    通过工作区文件 .should_email / .report_mode 在 step 间可靠传递（比 GITHUB_ENV 更稳）
       # --------------------------------------------------------------------------------
-      - name: 根据调度设置推送模式
+      - name: 计算发送标志与报告模式
         id: setmode
         if: success()
         env:
@@ -87,25 +76,20 @@ jobs:
           TZ=Asia/Shanghai
           TODAY=$(date +%Y-%m-%d)
           LAST=$(cat email_sent_date.txt 2>/dev/null || echo "")
+          MODE="incremental"; SHOULD_EMAIL="false"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            # 手动触发：总是发送，便于验证
-            MODE="daily"; NOTIFY="true"
+            MODE="daily"; SHOULD_EMAIL="true"
           elif [ "$TODAY" != "$LAST" ]; then
-            # 当天首班：发送每日汇总
-            MODE="daily"; NOTIFY="true"
-          else
-            # 当天后续班次：仅刷新热榜，不发邮件
-            MODE="incremental"; NOTIFY="false"
+            MODE="daily"; SHOULD_EMAIL="true"
           fi
+          echo "$MODE" > .report_mode
+          echo "$SHOULD_EMAIL" > .should_email
           echo "调度表达式: $SCHEDULE"
           echo "今天日期(北京): $TODAY | 上次发送: ${LAST:-无}"
-          echo "报告模式: $MODE | 通知: $NOTIFY"
+          echo "报告模式: $MODE | 是否发邮件: $SHOULD_EMAIL"
           sed -i "s/^\(  mode: \).*/\1\"$MODE\"/" config/config.yaml
           echo "--- 校验 config.yaml 关键字段 ---"
           grep -nE '^  mode:' config/config.yaml
-          # 写入 GITHUB_OUTPUT（备用）与 GITHUB_ENV（跨 step 可靠传递）
-          echo "notify=$NOTIFY" >> "$GITHUB_OUTPUT"
-          echo "NOTIFY=$NOTIFY" >> "$GITHUB_ENV"
 
       - name: Run crawler
         if: success()
@@ -131,8 +115,8 @@ jobs:
           S3_REGION: ${{ secrets.S3_REGION }}
           GITHUB_ACTIONS: true
         run: |
-          # 仅在需要通知时注入邮件凭据，避免每小时班重复发送（每日一封）
-          if [ "$NOTIFY" = "true" ]; then
+          SHOULD_EMAIL=$(cat .should_email 2>/dev/null || echo false)
+          if [ "$SHOULD_EMAIL" = "true" ]; then
             echo "📧 本次将发送邮件通知"
             export EMAIL_FROM="${{ secrets.EMAIL_FROM }}"
             export EMAIL_PASSWORD="${{ secrets.EMAIL_PASSWORD }}"
@@ -146,13 +130,14 @@ jobs:
 
       # --------------------------------------------------------------------------------
       # 📄 提交 HTML 报告到仓库，供 GitHub Pages 展示实时热榜
+      #    报告实际路径：output/html/latest/{mode}.html（如 daily.html）
       # --------------------------------------------------------------------------------
       - name: Commit report to repository
         if: success()
         env:
           GIT_TOKEN: ${{ github.token }}
         run: |
-          SRC=$(find output -name "index.html" 2>/dev/null | head -1)
+          SRC=$(find output/html/latest -maxdepth 1 -name "*.html" 2>/dev/null | head -1)
           if [ -z "$SRC" ]; then
             SRC=$(find output -name "*.html" 2>/dev/null | head -1)
           fi
@@ -160,6 +145,7 @@ jobs:
             echo "ℹ️ 未生成 HTML 报告，跳过提交"
             exit 0
           fi
+          echo "📄 找到报告: $SRC"
           cp "$SRC" index.html
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -172,7 +158,8 @@ jobs:
             echo "✅ 已更新 index.html，GitHub Pages 将在 1-2 分钟内刷新"
           fi
           # 若本次发送了邮件，记录今日日期，避免当天重复发送
-          if [ "$NOTIFY" = "true" ]; then
+          SHOULD_EMAIL=$(cat .should_email 2>/dev/null || echo false)
+          if [ "$SHOULD_EMAIL" = "true" ]; then
             TZ=Asia/Shanghai
             date +%Y-%m-%d > email_sent_date.txt
             git add email_sent_date.txt
