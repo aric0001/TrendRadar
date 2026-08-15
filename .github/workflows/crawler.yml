@@ -80,7 +80,7 @@ jobs:
         env:
           SCHEDULE: ${{ github.event.schedule }}
         run: |
-          TZ=Asia/Shanghai
+          export TZ=Asia/Shanghai
           NOW_H=$(date +%H)
           TODAY=$(date +%Y-%m-%d)
           SLOT=""
@@ -172,7 +172,7 @@ jobs:
           # 若本次发送了邮件，记录时段，避免当天重复发送
           SHOULD_EMAIL=$(cat .should_email 2>/dev/null || echo false)
           if [ "$SHOULD_EMAIL" = "true" ]; then
-            TZ=Asia/Shanghai
+            export TZ=Asia/Shanghai
             SLOT="manual"
             NOW_H=$(date +%H)
             if [ "$NOW_H" = "7"  ]; then SLOT="morning"; fi
