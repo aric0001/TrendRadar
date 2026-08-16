@@ -84,7 +84,7 @@ jobs:
           NOW_H=$(date +%H)
           TODAY=$(date +%Y-%m-%d)
           SLOT=""
-          if [ "$NOW_H" = "7"  ]; then SLOT="morning"; fi
+          if [ "$NOW_H" = "07" ]; then SLOT="morning"; fi
           if [ "$NOW_H" = "20" ]; then SLOT="evening"; fi
           MODE="incremental"; SHOULD_EMAIL="false"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -210,7 +210,7 @@ jobs:
             export TZ=Asia/Shanghai
             SLOT="manual"
             NOW_H=$(date +%H)
-            if [ "$NOW_H" = "7"  ]; then SLOT="morning"; fi
+            if [ "$NOW_H" = "07" ]; then SLOT="morning"; fi
             if [ "$NOW_H" = "20" ]; then SLOT="evening"; fi
             echo "sent:$(date +%Y-%m-%d):${SLOT}" >> email_sent.txt
             git add email_sent.txt
