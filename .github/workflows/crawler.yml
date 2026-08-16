@@ -72,7 +72,7 @@ jobs:
       #      - 北京时间 07:00 / 20:00 班次 -> 发送每日汇总邮件（daily 模式）
       #      - 手动触发 -> 发送每日汇总邮件（daily 模式）
       #    节流：email_sent.txt 记录 "sent:日期:时段"，同一时段当天不重复发送
-      #    通过工作区文件 .should_email / .report_mode 在 step 间可靠传递（比 GITHUB_ENV 更稳）
+      #    通过工作区文件 .should_email / .report_mode / .report_slot 在 step 间可靠传递（比 GITHUB_ENV 更稳）
       # --------------------------------------------------------------------------------
       - name: 计算发送标志与报告模式
         id: setmode
@@ -81,14 +81,19 @@ jobs:
           SCHEDULE: ${{ github.event.schedule }}
         run: |
           export TZ=Asia/Shanghai
+          # 当前(北京)小时，转成无前导零数字，规避 "07" != "7" 这类比较陷阱
           NOW_H=$(date +%H)
+          NOW_H=$((10#$NOW_H))
           TODAY=$(date +%Y-%m-%d)
           SLOT=""
-          if [ "$NOW_H" = "07" ]; then SLOT="morning"; fi
-          if [ "$NOW_H" = "20" ]; then SLOT="evening"; fi
+          # 小时区间(更宽松)：覆盖 GitHub cron 偶尔跨整点的延迟
+          #   早报: 07:00-08:59 (北京时间)
+          #   晚报: 20:00-21:59 (北京时间)
+          if [ "$NOW_H" -ge 7 ] && [ "$NOW_H" -le 8 ]; then SLOT="morning"; fi
+          if [ "$NOW_H" -ge 20 ] && [ "$NOW_H" -le 21 ]; then SLOT="evening"; fi
           MODE="incremental"; SHOULD_EMAIL="false"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            MODE="daily"; SHOULD_EMAIL="true"
+            MODE="daily"; SHOULD_EMAIL="true"; SLOT="manual"
           elif [ -n "$SLOT" ]; then
             if ! grep -qxF "sent:${TODAY}:${SLOT}" email_sent.txt 2>/dev/null; then
               MODE="daily"; SHOULD_EMAIL="true"
@@ -96,6 +101,7 @@ jobs:
           fi
           echo "$MODE" > .report_mode
           echo "$SHOULD_EMAIL" > .should_email
+          echo "$SLOT" > .report_slot
           echo "调度表达式: $SCHEDULE"
           echo "当前(北京)小时: $NOW_H | 时段: ${SLOT:-无} | 今天: $TODAY"
           echo "报告模式: $MODE | 是否发邮件: $SHOULD_EMAIL"
@@ -208,10 +214,9 @@ jobs:
           SHOULD_EMAIL=$(cat .should_email 2>/dev/null || echo false)
           if [ "$SHOULD_EMAIL" = "true" ]; then
             export TZ=Asia/Shanghai
-            SLOT="manual"
-            NOW_H=$(date +%H)
-            if [ "$NOW_H" = "07" ]; then SLOT="morning"; fi
-            if [ "$NOW_H" = "20" ]; then SLOT="evening"; fi
+            # 复用 setmode 步确定的时段，保证两处一致(避免跨整点时差导致记录错位)
+            SLOT=$(cat .report_slot 2>/dev/null || echo "")
+            if [ -z "$SLOT" ]; then SLOT="manual"; fi
             echo "sent:$(date +%Y-%m-%d):${SLOT}" >> email_sent.txt
             git add email_sent.txt
             git commit -m "chore: 记录邮件发送时段 [skip ci]" || true
