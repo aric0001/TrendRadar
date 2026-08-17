@@ -86,11 +86,13 @@ jobs:
           NOW_H=$((10#$NOW_H))
           TODAY=$(date +%Y-%m-%d)
           SLOT=""
-          # 小时区间(更宽松)：覆盖 GitHub cron 偶尔跨整点的延迟
-          #   早报: 07:00-08:59 (北京时间)
-          #   晚报: 20:00-21:59 (北京时间)
-          if [ "$NOW_H" -ge 7 ] && [ "$NOW_H" -le 8 ]; then SLOT="morning"; fi
-          if [ "$NOW_H" -ge 20 ] && [ "$NOW_H" -le 21 ]; then SLOT="evening"; fi
+          # 小时窗口(宽松)：GitHub cron 实测延迟 9~78 分钟，极端可超 2 小时，
+          # 故窗口留足冗余，并让窗口内的「每 3 小时 Pages 班」自动成为补发机会：
+          #   早报窗口: 07:00-11:59 (北京) —— 邮件专班 07:00 + Pages 班 09:05 兜底
+          #   晚报窗口: 20:00-23:59 (北京) —— 邮件专班 20:00 + Pages 班 21:05 兜底
+          # 是否真发由 email_sent.txt 节流决定：该时段当天已发过则跳过，绝不重复。
+          if [ "$NOW_H" -ge 7 ] && [ "$NOW_H" -le 11 ]; then SLOT="morning"; fi
+          if [ "$NOW_H" -ge 20 ] && [ "$NOW_H" -le 23 ]; then SLOT="evening"; fi
           MODE="incremental"; SHOULD_EMAIL="false"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             MODE="daily"; SHOULD_EMAIL="true"; SLOT="manual"
@@ -190,36 +192,46 @@ jobs:
         env:
           GIT_TOKEN: ${{ github.token }}
         run: |
+          export TZ=Asia/Shanghai
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # ---- (1) 报告 -> index.html ----
           SRC=$(find output/html/latest -maxdepth 1 -name "*.html" 2>/dev/null | head -1)
           if [ -z "$SRC" ]; then
             SRC=$(find output -name "*.html" 2>/dev/null | head -1)
           fi
-          if [ -z "$SRC" ]; then
-            echo "ℹ️ 未生成 HTML 报告，跳过提交"
-            exit 0
-          fi
-          echo "📄 找到报告: $SRC"
-          cp "$SRC" index.html
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add index.html
-          if git diff --cached --quiet; then
-            echo "ℹ️ 报告无变化，跳过提交"
+          if [ -n "$SRC" ]; then
+            echo "📄 找到报告: $SRC"
+            cp "$SRC" index.html
+            git add index.html
           else
-            git commit -m "chore: 更新热点报告 [skip ci]"
-            git push
-            echo "✅ 已更新 index.html，GitHub Pages 将在 1-2 分钟内刷新"
+            echo "ℹ️ 未生成 HTML 报告，本次不更新 index.html"
           fi
-          # 若本次发送了邮件，记录时段，避免当天重复发送
+
+          # ---- (2) 邮件时段记录（与报告合并进同一个 commit）----
+          # 合并提交的原因：两次 push 会触发两次 GitHub Pages 构建，
+          # 前一次被后一次取消（表现为 pages build 出现 cancelled），纯属浪费。
           SHOULD_EMAIL=$(cat .should_email 2>/dev/null || echo false)
           if [ "$SHOULD_EMAIL" = "true" ]; then
-            export TZ=Asia/Shanghai
             # 复用 setmode 步确定的时段，保证两处一致(避免跨整点时差导致记录错位)
             SLOT=$(cat .report_slot 2>/dev/null || echo "")
             if [ -z "$SLOT" ]; then SLOT="manual"; fi
             echo "sent:$(date +%Y-%m-%d):${SLOT}" >> email_sent.txt
+            # 只保留最近 14 天 + 去重，避免文件无限增长
+            CUTOFF=$(date -d "14 days ago" +%Y-%m-%d)
+            awk -F: -v c="$CUTOFF" 'NF>=3 && $2>=c' email_sent.txt \
+              | awk '!seen[$0]++' > email_sent.new
+            if [ -s email_sent.new ]; then mv email_sent.new email_sent.txt; else rm -f email_sent.new; fi
             git add email_sent.txt
-            git commit -m "chore: 记录邮件发送时段 [skip ci]" || true
-            git push || true
             echo "📧 已记录邮件发送: $(date +%Y-%m-%d) / ${SLOT}"
+          fi
+
+          # ---- (3) 一次性提交 ----
+          if git diff --cached --quiet; then
+            echo "ℹ️ 无变化，跳过提交"
+          else
+            git commit -m "chore: 更新热点报告 [skip ci]"
+            git push
+            echo "✅ 已提交，GitHub Pages 将在 1-2 分钟内刷新"
           fi
