@@ -153,7 +153,7 @@ rss:
 # 4. 报告模式
 # ===============================================================
 report:
-  mode: "daily"                        # 报告模式（daily=当日汇总）
+  mode: "incremental"                  # 报告模式（incremental=增量,只推新增零重复）
                                       # daily = 当日汇总，按时推送当天所有匹配新闻（会包含之前推过的）
                                       # current = 当前榜单，按时推送当前在榜的匹配新闻（持续在榜的每次都出现）
                                       # incremental = 增量监控，只推送新增内容，零重复（没有新增时不推送）
@@ -245,9 +245,9 @@ display:
   # 独立展示区：将指定平台/RSS 完整展示，不受关键词过滤
   # 推送展示由 regions.standalone 控制，AI 分析由 ai_analysis.include_standalone 控制
   standalone:
-    platforms: ["toutiao", "baidu", "wallstreetcn-hot", "thepaper", "bilibili-hot-search", "cls-hot", "ifeng", "tieba", "weibo", "douyin", "zhihu"]     # 热榜平台 ID 列表（全平台完整热搜）
+    platforms: ["toutiao", "baidu", "weibo", "zhihu", "douyin", "bilibili-hot-search"]   # 热榜平台 ID（已裁剪金融/泛新闻噪声源）
     rss_feeds: []                                # RSS 源 ID 列表（如 ["hacker-news"]）
-    max_items: 20                                # 每个源最多展示条数（0=不限制）
+    max_items: 8                                # 每个源最多展示条数（0=不限制）
 
 
 # ===============================================================
